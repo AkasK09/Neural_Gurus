@@ -1,0 +1,10 @@
+streamlit>=1.30.0
+easyocr>=1.7.1
+sentence-transformers>=2.2.2
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.12.2
+pandas>=2.2.1
+Pillow>=10.2.0
+torch>=2.1.0
+numpy>=1.26.4
+PyMuPDF>=1.23.21
