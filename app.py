@@ -8,7 +8,7 @@ import torch
 import fitz  # PyMuPDF
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
-import numpy as np  # Fix for np not defined
+import numpy as np
 
 # ---- Page Config ----
 st.set_page_config(page_title="Fast Marksheet Correction Web (EasyOCR)", page_icon="📄", layout="wide")
@@ -61,9 +61,14 @@ st.markdown("""
 # ---- Load OCR and Embedding Models ----
 @st.cache_resource
 def load_models():
-    reader = easyocr.Reader(['en'])
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    return reader, model
+    try:
+        st.info("Loading OCR and embedding models...")
+        reader = easyocr.Reader(['en'], verbose=True)
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        return reader, model
+    except Exception as e:
+        st.error(f"Error loading models: {e}")
+        raise
 
 reader, bert_model = load_models()
 
@@ -82,52 +87,70 @@ def get_similarity(model_answer, student_answer):
 # ---- PDF to Image ----
 def extract_images_from_pdf(pdf_file):
     images = []
-    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    for page in doc:
-        pix = page.get_pixmap()
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append(img)
-    return images
+    try:
+        doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+        for page in doc:
+            pix = page.get_pixmap()
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            images.append(img)
+        return images
+    except Exception as e:
+        st.error(f"Failed to extract PDF pages: {e}")
+        return []
 
 # ---- DB Functions ----
 def init_db():
-    conn = sqlite3.connect("results.db")
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS results (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    filename TEXT,
-                    extracted_answer TEXT,
-                    bert_score REAL,
-                    fuzzy_score REAL,
-                    marks_awarded INTEGER
-                )''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect("results.db")
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS results (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        filename TEXT,
+                        extracted_answer TEXT,
+                        bert_score REAL,
+                        fuzzy_score REAL,
+                        marks_awarded INTEGER
+                    )''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Database initialization error: {e}")
 
 def insert_result(filename, answer, bert_score, fuzzy_score, marks):
-    conn = sqlite3.connect("results.db")
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM results WHERE filename = ? AND bert_score = ? AND fuzzy_score = ?", (filename, bert_score, fuzzy_score))
-    exists = c.fetchone()[0]
-    if not exists:
-        c.execute("INSERT INTO results (filename, extracted_answer, bert_score, fuzzy_score, marks_awarded) VALUES (?, ?, ?, ?, ?)",
-                  (filename, answer, bert_score, fuzzy_score, marks))
-        conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect("results.db")
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM results WHERE filename = ? AND bert_score = ? AND fuzzy_score = ?",
+                  (filename, bert_score, fuzzy_score))
+        exists = c.fetchone()[0]
+        if not exists:
+            c.execute("INSERT INTO results (filename, extracted_answer, bert_score, fuzzy_score, marks_awarded) VALUES (?, ?, ?, ?, ?)",
+                      (filename, answer, bert_score, fuzzy_score, marks))
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Failed to insert result: {e}")
 
 def get_all_results():
-    conn = sqlite3.connect("results.db")
-    df = pd.read_sql_query("SELECT * FROM results", conn)
-    conn.close()
-    return df
+    try:
+        conn = sqlite3.connect("results.db")
+        df = pd.read_sql_query("SELECT * FROM results", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Failed to fetch results: {e}")
+        return pd.DataFrame()
 
 def delete_selected_rows(row_ids):
-    conn = sqlite3.connect("results.db")
-    c = conn.cursor()
-    for row_id in row_ids:
-        c.execute("DELETE FROM results WHERE id = ?", (row_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect("results.db")
+        c = conn.cursor()
+        for row_id in row_ids:
+            c.execute("DELETE FROM results WHERE id = ?", (row_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Failed to delete rows: {e}")
 
 # ---- Initialize DB ----
 init_db()
