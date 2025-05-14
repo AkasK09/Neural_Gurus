@@ -63,8 +63,8 @@ st.markdown("""
 def load_models():
     try:
         st.info("Loading OCR and embedding models...")
-        reader = easyocr.Reader(['en'], verbose=True)
-        model = SentenceTransformer('all-MiniLM-L6-v2')
+        reader = easyocr.Reader(['en'], gpu=False, verbose=True)  # CPU only
+        model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')  # CPU only
         return reader, model
     except Exception as e:
         st.error(f"Error loading models: {e}")
