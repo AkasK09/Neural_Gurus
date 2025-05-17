@@ -8,7 +8,7 @@ import torch
 import fitz  # PyMuPDF
 from fuzzywuzzy import fuzz
 from sentence_transformers import SentenceTransformer, util
-import numpy as np
+import numpy as np  # Fix for np not defined
 
 # ---- Page Config ----
 st.set_page_config(page_title="Fast Marksheet Correction Web (EasyOCR)", page_icon="📄", layout="wide")
@@ -61,14 +61,9 @@ st.markdown("""
 # ---- Load OCR and Embedding Models ----
 @st.cache_resource
 def load_models():
-    try:
-        st.info("Loading OCR and embedding models...")
-        reader = easyocr.Reader(['en'], gpu=False, verbose=True)  # CPU only
-        model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')  # CPU only
-        return reader, model
-    except Exception as e:
-        st.error(f"Error loading models: {e}")
-        raise
+    reader = easyocr.Reader(['en'])
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    return reader, model
 
 reader, bert_model = load_models()
 
@@ -93,64 +88,49 @@ def extract_images_from_pdf(pdf_file):
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             images.append(img)
-        return images
     except Exception as e:
-        st.error(f"Failed to extract PDF pages: {e}")
-        return []
+        st.error(f"PDF extraction failed: {e}")
+    return images
 
 # ---- DB Functions ----
 def init_db():
-    try:
-        conn = sqlite3.connect("results.db")
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS results (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        filename TEXT,
-                        extracted_answer TEXT,
-                        bert_score REAL,
-                        fuzzy_score REAL,
-                        marks_awarded INTEGER
-                    )''')
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        st.error(f"Database initialization error: {e}")
+    conn = sqlite3.connect("results.db")
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filename TEXT,
+                    extracted_answer TEXT,
+                    bert_score REAL,
+                    fuzzy_score REAL,
+                    marks_awarded INTEGER
+                )''')
+    conn.commit()
+    conn.close()
 
 def insert_result(filename, answer, bert_score, fuzzy_score, marks):
-    try:
-        conn = sqlite3.connect("results.db")
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM results WHERE filename = ? AND bert_score = ? AND fuzzy_score = ?",
-                  (filename, bert_score, fuzzy_score))
-        exists = c.fetchone()[0]
-        if not exists:
-            c.execute("INSERT INTO results (filename, extracted_answer, bert_score, fuzzy_score, marks_awarded) VALUES (?, ?, ?, ?, ?)",
-                      (filename, answer, bert_score, fuzzy_score, marks))
-            conn.commit()
-        conn.close()
-    except Exception as e:
-        st.error(f"Failed to insert result: {e}")
+    conn = sqlite3.connect("results.db")
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM results WHERE filename = ? AND bert_score = ? AND fuzzy_score = ?", (filename, bert_score, fuzzy_score))
+    exists = c.fetchone()[0]
+    if not exists:
+        c.execute("INSERT INTO results (filename, extracted_answer, bert_score, fuzzy_score, marks_awarded) VALUES (?, ?, ?, ?, ?)",
+                  (filename, answer, bert_score, fuzzy_score, marks))
+        conn.commit()
+    conn.close()
 
 def get_all_results():
-    try:
-        conn = sqlite3.connect("results.db")
-        df = pd.read_sql_query("SELECT * FROM results", conn)
-        conn.close()
-        return df
-    except Exception as e:
-        st.error(f"Failed to fetch results: {e}")
-        return pd.DataFrame()
+    conn = sqlite3.connect("results.db")
+    df = pd.read_sql_query("SELECT * FROM results", conn)
+    conn.close()
+    return df
 
 def delete_selected_rows(row_ids):
-    try:
-        conn = sqlite3.connect("results.db")
-        c = conn.cursor()
-        for row_id in row_ids:
-            c.execute("DELETE FROM results WHERE id = ?", (row_id,))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        st.error(f"Failed to delete rows: {e}")
+    conn = sqlite3.connect("results.db")
+    c = conn.cursor()
+    for row_id in row_ids:
+        c.execute("DELETE FROM results WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
 
 # ---- Initialize DB ----
 init_db()
@@ -178,14 +158,23 @@ with col2:
                 if file.name.lower().endswith(".pdf"):
                     images = extract_images_from_pdf(file)
                 else:
-                    image = Image.open(BytesIO(file.read())).convert("RGB")
-                    images = [image]
+                    try:
+                        image = Image.open(BytesIO(file.read())).convert("RGB")
+                        images = [image]
+                    except Exception as e:
+                        st.error(f"Image load failed: {e}")
+                        continue
 
                 for idx, image in enumerate(images):
                     display_name = f"{file.name}" if len(images) == 1 else f"{file.name} [Page {idx + 1}]"
                     st.subheader(f"📄 File: {display_name}")
 
-                    extracted_text = extract_text_easyocr(image)
+                    try:
+                        extracted_text = extract_text_easyocr(image)
+                    except Exception as e:
+                        st.error(f"OCR failed: {e}")
+                        continue
+
                     st.text_area("✍ Extracted Answer", extracted_text, height=150)
 
                     bert_score, fuzzy_score = get_similarity(model_answer, extracted_text)
@@ -211,12 +200,18 @@ with col2:
                         "Marks Awarded": marks
                     })
 
-        df_results = pd.DataFrame(results)
-        st.subheader("📊 Current Session Results")
-        st.dataframe(df_results)
+        if results:
+            df_results = pd.DataFrame(results)
+            st.subheader("📊 Current Session Results")
+            st.dataframe(df_results)
 
-        csv = df_results.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇ Download Session CSV", csv, "session_results.csv", "text/csv")
+            csv = df_results.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇ Download Session CSV", csv, "session_results.csv", "text/csv")
+
+            if st.button("🔄 Reset Session Results"):
+                results.clear()
+                st.experimental_rerun()
+
     else:
         st.info("👈 Upload model answer and answer sheet images or PDFs to begin.")
 
